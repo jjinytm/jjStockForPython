@@ -68,6 +68,7 @@ class MyWindow(QMainWindow):
                        self._set_cell_style(crrOfRow, colidx, self.dataTable.item(crrOfRow, colidx).text())
 
                     colidx += 1
+                    #좀바꾸면 어떻냐는 git 테스트용.
 
     ##데이터 가져오기 함수
     def _comm_get_data(self, code, real_type, field_name, index, item_name):

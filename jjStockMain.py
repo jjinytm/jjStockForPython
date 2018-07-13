@@ -13,7 +13,7 @@ class MyWindow(QMainWindow):
         self.kiwoom.OnReceiveTrData.connect(self._receive_tr_data)
 
         self.setWindowTitle("종목코드")
-        self.setGeometry(0,0,1800,900)
+        self.setGeometry(0,0,1800,900) 
 
         btn1 = QPushButton("조회", self)
         btn1.move(120, 10)

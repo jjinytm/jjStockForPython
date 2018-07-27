@@ -61,6 +61,12 @@ class MyWindow(QMainWindow):
         self.dataTable.setGeometry(10, 700, 1780, 190)
         self.dataTable.setHorizontalHeaderLabels(self.headers)
 
+        ## 종목별투자자기관별요청 데이터조회 테이블 확장 버튼
+        self.exp_dt_btn = QPushButton(self)
+        self.exp_dt_btn.setGeometry(9, 678, 24, 24)
+        self.exp_dt_btn.setText('▲')
+        self.exp_dt_btn.clicked.connect(self.exp_dt_btn_clicked)
+
         ##종목별투자자기관별요청 컬럼정보
         self.jmTabColItemInfo = ['일자', '현재가', '전일대비', '등락율', '개인투자자', '외국인투자자', '기관계', '금융투자',
                             '보험', '투신', '기타금융', '은행', '연기금등', '사모펀드', '국가', '기타법인', '내외국인',

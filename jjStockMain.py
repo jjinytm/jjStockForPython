@@ -220,7 +220,7 @@ class MyWindow(QMainWindow):
 
         nd_gaein_data = np.zeros(5, dtype=int)      # 누적, 저점, 매집수, 매집고점, 분산비율
         for i in range(self.np_row_data.shape[0]):
-            for j in range(self.np_row_data.shape[1]):
+            for j in range(self.np_sugup_data.shape[1]):
                 if j == 0: self.np_sugup_data[i, j] = self.np_row_data[i, j]         # 일자
                 if j == 1: self.np_sugup_data[i, j] = self.np_row_data[i, j]         # 현재가
 
@@ -234,6 +234,8 @@ class MyWindow(QMainWindow):
 
     # 수급 주체별 데이터 generator
     def _make_sugup_part_data(self, fromidx, rowidx):
+        print('fromidx : ', fromidx ,'rowidx : ' , rowidx)
+
         for i in range(fromidx, fromidx+5):
             # 누적합
             if i == fromidx:

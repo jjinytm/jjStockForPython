@@ -1,6 +1,7 @@
 import sys
 import time
 import numpy as np
+import xlwt
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
@@ -15,10 +16,13 @@ sMonth = datetime.today().strftime('%m')
 sDay = datetime.today().strftime('%d')
 
 # 연속데이터 조회하기전 sleep 시간 설정
-TR_REQ_TIME_INTERVAL = 0.2
+TR_REQ_TIME_INTERVAL = 0.04
 
 # 정적 사이즈
 OBJECT_WIDTH_MAX_SIZE = 1780
+
+# 로우데이터 배열.
+rowdatas = []
 
 
 class MyWindow(QMainWindow):
@@ -40,7 +44,7 @@ class MyWindow(QMainWindow):
 
         # 종목코드 입력 인풋.
         self.jongmokCode = QLineEdit(self)
-        self.jongmokCode.setText('093370')  ## 임시종목 후성.
+        self.jongmokCode.setText('089590')  ## 임시종목 후성.
         self.jongmokCode.move(10,10)
         self.jongmokCode.setAlignment(Qt.AlignHCenter)  # 텍스트 가운데 정렬
 
@@ -76,6 +80,12 @@ class MyWindow(QMainWindow):
         self.exp_dt_btn.setText('▲')
         self.exp_dt_btn.clicked.connect(self.exp_dt_btn_clicked)
 
+        # 엑셀 저장
+        self.save_to_xls_btn = QPushButton(self)
+        self.save_to_xls_btn.setGeometry(1680, 677, 80, 24)
+        self.save_to_xls_btn.setText('엑셀저장')
+        self.save_to_xls_btn.clicked.connect(self.savefile)
+
     # 종목별투자자기관별 리스트 테이블 확장 버튼 클릭시.
     def exp_dt_btn_clicked(self):
         thei = self.rowDataTabWid.height()
@@ -83,10 +93,12 @@ class MyWindow(QMainWindow):
             self.rowDataTabWid.setGeometry(5, 500, OBJECT_WIDTH_MAX_SIZE+10, 400)
             self.exp_dt_btn.move(600, 517)
             self.exp_dt_btn.setText('▼')
+            self.save_to_xls_btn.setGeometry(1680, 517, 80, 24)
         else:
             self.rowDataTabWid.setGeometry(5, 660, OBJECT_WIDTH_MAX_SIZE+10, 240)
             self.exp_dt_btn.move(600, 677)
             self.exp_dt_btn.setText('▲')
+            self.save_to_xls_btn.setGeometry(1680, 677, 80, 24)
 
     # 날짜 레이블 클릭
     def cal_btn_clicked(self):
@@ -105,7 +117,8 @@ class MyWindow(QMainWindow):
     def btn1_clicked(self):
         # 조회전 기존 데이터 리셋.
         self.rowDataTabWid.dataTable.setRowCount(0)
-
+        rowdatas.clear()
+        print('data load started.', end='')
         # 종목별투자자기관별요청
         self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "일자", self.cal_label.text().replace('-', ''))
         self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "종목코드", self.jongmokCode.text())
@@ -125,6 +138,7 @@ class MyWindow(QMainWindow):
             self._comm_rq_data("opt10059_req", "opt10059", 2, "0796")
 
     def _comm_rq_data(self, rqname, trcode, next, screen_no):
+
         self.kiwoom.dynamicCall("CommRqData(QString, QString, int, QString)", rqname, trcode, next, screen_no)
         # 이벤트 루프 만들기
         self.tr_event_loop = QEventLoop()
@@ -149,6 +163,7 @@ class MyWindow(QMainWindow):
     # 종목별투자자별 리스트 응답 후 처리
     def _opt10059_set(self, rqname, trcode):
         data_cnt = self._get_repeat_cnt(trcode, rqname)
+
         for i in range(data_cnt):
             crrOfRow = self.rowDataTabWid.dataTable.rowCount()
             self.rowDataTabWid.dataTable.setRowCount(crrOfRow + 1)
@@ -165,11 +180,13 @@ class MyWindow(QMainWindow):
                 colidx += 1
                 self.lasted_date = self._comm_get_data(trcode, "", rqname, i, '일자')
 
-            print(one_row_arr)
+            rowdatas.append(one_row_arr)
 
         if self.remained_data == False:
             print('data load ended.')
             self._make_sugup_data()
+        else:
+            print('.', end='')
 
     # 데이터 가져오기 함수
     def _comm_get_data(self, code, real_type, field_name, index, item_name):
@@ -192,12 +209,68 @@ class MyWindow(QMainWindow):
     # 수급 데이터 만들기
     def _make_sugup_data(self):
         print('수급데이터 만들기함수가 실행되었습니다')
+        # 로우데이터 데이터를 ndarray객체로 만든다. ndarray객체가 수치계산에 더 빠르게 때문이다.
+        self.np_row_data = np.array(rowdatas)
+        self.np_sugup_data = np.zeros((self.np_row_data[:, 1].size, 87), dtype=int)
 
-        # 로우데이터 테이블의 데이터를 데이터객체로 마이그레이션 한다.
-        rowCount = self.rowDataTabWid.dataTable.rowCount()
-        colCount = self.rowDataTabWid.dataTable.columnCount()
-        sugup_row_data = self.rowDataTabWid.dataTable.get
+        # ['일자', '현재가', '전일대비', '등락율', '개인', '외국인', '기관계', '금융투자', '보험', '투신',
+        # '기타금융', '은행', '연기금등', '사모펀드', '국가', '기타법인', '내외국인', '거래량']
+        # 데이터역정렬 (역순계산 때문에)
+        self.np_row_data = np.flipud(self.np_row_data)
 
+        nd_gaein_data = np.zeros(5, dtype=int)      # 누적, 저점, 매집수, 매집고점, 분산비율
+        for i in range(self.np_row_data.shape[0]):
+            for j in range(self.np_row_data.shape[1]):
+                if j == 0: self.np_sugup_data[i, j] = self.np_row_data[i, j]         # 일자
+                if j == 1: self.np_sugup_data[i, j] = self.np_row_data[i, j]         # 현재가
+
+                ## 여기서부터는 함수로 가능
+                ## 세력합 제외 각 주체별 개별데이터 생성.
+                if j in [2, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65] : self._make_sugup_part_data(j, i)
+
+            nd_gaein_data[0] += int(self.np_row_data[i, 4])
+
+        print(self.np_sugup_data)
+
+    # 수급 주체별 데이터 generator
+    def _make_sugup_part_data(self, fromidx, rowidx):
+        for i in range(fromidx, fromidx+5):
+            # 누적합
+            if i == fromidx:
+                if rowidx == 0:      self.np_sugup_data[rowidx, fromidx] = self.np_row_data[rowidx, 4]
+                elif rowidx > 0:     self.np_sugup_data[rowidx, fromidx] = self.np_sugup_data[rowidx-1, i] + int(self.np_row_data[rowidx, 4])
+            # 최고저점
+            if i == fromidx+1:
+                if rowidx == 0:      self.np_sugup_data[rowidx, fromidx]= self.np_row_data[i, 4]
+                elif rowidx > 0:     self.np_sugup_data[rowidx, fromidx] = min(self.np_sugup_data[rowidx-1, i-1], self.np_sugup_data[rowidx, i-1])
+            # 매집수량
+            if i == fromidx+2: self.np_sugup_data[rowidx, fromidx] = self.np_sugup_data[rowidx, i-2] - self.np_sugup_data[i, i-3]
+            # 매집고점
+            if i == fromidx+3:
+                if rowidx == 0:      self.np_sugup_data[rowidx, fromidx] = self.np_sugup_data[rowidx, i-1]
+                elif rowidx > 0:     self.np_sugup_data[rowidx, fromidx] = max(self.np_sugup_data[rowidx-1, i], self.np_sugup_data[rowidx, i-1])
+            # 분산비율
+            if i == fromidx+4:
+                if self.np_sugup_data[rowidx, i-2] == 0 or self.np_sugup_data[rowidx, i-1] == 0:
+                    self.np_sugup_data[rowidx, fromidx] = 0
+                else:
+                    self.np_sugup_data[rowidx, fromidx] = (self.np_sugup_data[rowidx, i-2] / self.np_sugup_data[rowidx, i-1]) * 100
+
+    # 엑셀파일로 데이터 저장
+    def savefile(self):
+        wbk = xlwt.Workbook()
+        sheet = wbk.add_sheet("sheet 1", cell_overwrite_ok=True)
+        self.add2(sheet)
+        wbk.save("/Users/pconn/Desktop/export.xlsx")
+
+    def add2(self, sheet):
+        for currentColumn in range(self.rowDataTabWid.dataTable.columnCount()):
+            for currentRow in range(self.rowDataTabWid.dataTable.rowCount()):
+                try:
+                    teext = str(self.rowDataTabWid.dataTable.item(currentRow, currentColumn).text())
+                    sheet.write(currentRow, currentColumn, teext)
+                except AttributeError:
+                    pass
 
 # PyQt5의 QTableWidget을 이용한 탭메뉴 구성
 class RowDataTabWid(QWidget):
@@ -254,6 +327,8 @@ class RowDataTabWid(QWidget):
         print("\n")
         for currentQTableWidgetItem in self.tableWidget.selectedItems():
             print(currentQTableWidgetItem.row(), currentQTableWidgetItem.column(), currentQTableWidgetItem.text())
+
+
 
 
 if __name__ == "__main__":

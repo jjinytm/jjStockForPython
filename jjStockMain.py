@@ -16,13 +16,19 @@ sMonth = datetime.today().strftime('%m')
 sDay = datetime.today().strftime('%d')
 
 # 연속데이터 조회하기전 sleep 시간 설정
-TR_REQ_TIME_INTERVAL = 0.04
+TR_REQ_TIME_INTERVAL = 0.2
 
 # 정적 사이즈
 OBJECT_WIDTH_MAX_SIZE = 1780
 
 # 로우데이터 배열.
 rowdatas = []
+
+# 수급데이터 주체별 인덱스 추출 딕셔너리
+juche_dic = {2:4, 7:6, 15:5, 20:7, 25:8, 30:9, 35:10, 40:11, 45:12, 50:13, 55:14, 60:15, 65:16}
+
+# 수급분석표용 주체별 인덱스 추출 딕셔너리
+juche_analysis_dic = {3: 2, 4: 7, 5: 15, 6: 20, 7: 25, 8: 30, 9: 35, 10: 40, 11: 45, 12: 50, 13: 55, 14: 60, 15: 65}
 
 
 class MyWindow(QMainWindow):
@@ -99,6 +105,8 @@ class MyWindow(QMainWindow):
             self.exp_dt_btn.move(600, 677)
             self.exp_dt_btn.setText('▲')
             self.save_to_xls_btn.setGeometry(1680, 677, 80, 24)
+
+    # 수급분석차트를 그리기 위한 수급주체별데이터 생성 완료
 
     # 날짜 레이블 클릭
     def cal_btn_clicked(self):
@@ -208,55 +216,147 @@ class MyWindow(QMainWindow):
 
     # 수급 데이터 만들기
     def _make_sugup_data(self):
-        print('수급데이터 만들기함수가 실행되었습니다')
+        print('수급데이터 만들기함수가 실행되었습니다.')
         # 로우데이터 데이터를 ndarray객체로 만든다. ndarray객체가 수치계산에 더 빠르게 때문이다.
-        self.np_row_data = np.array(rowdatas)
-        self.np_sugup_data = np.zeros((self.np_row_data[:, 1].size, 87), dtype=int)
+        global np_row_data
+        np_row_data = np.array(rowdatas)
+        global np_sugup_data
+        np_sugup_data = np.zeros((np_row_data[:, 1].size, 70), dtype=int)
 
-        # ['일자', '현재가', '전일대비', '등락율', '개인', '외국인', '기관계', '금융투자', '보험', '투신',
-        # '기타금융', '은행', '연기금등', '사모펀드', '국가', '기타법인', '내외국인', '거래량']
         # 데이터역정렬 (역순계산 때문에)
-        self.np_row_data = np.flipud(self.np_row_data)
+        np_row_data = np.flipud(np_row_data)
 
-        nd_gaein_data = np.zeros(5, dtype=int)      # 누적, 저점, 매집수, 매집고점, 분산비율
-        for i in range(self.np_row_data.shape[0]):
-            for j in range(self.np_sugup_data.shape[1]):
-                if j == 0: self.np_sugup_data[i, j] = self.np_row_data[i, j]         # 일자
-                if j == 1: self.np_sugup_data[i, j] = self.np_row_data[i, j]         # 현재가
-
+        for i in range(np_row_data.shape[0]):
+            for j in range(np_sugup_data.shape[1]):
+                if j == 0: np_sugup_data[i, j] = np_row_data[i, j]         # 일자
+                if j == 1: np_sugup_data[i, j] = np_row_data[i, j]         # 현재가
                 ## 여기서부터는 함수로 가능
-                ## 세력합 제외 각 주체별 개별데이터 생성.
-                if j in [2, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65] : self._make_sugup_part_data(j, i)
+                ## 각 주체별 개별데이터 생성.
+                if j in juche_dic.keys() : self._make_sugup_part_data(j, i)
 
-            nd_gaein_data[0] += int(self.np_row_data[i, 4])
+        ## 세력합 5일, 20일, 60일 추세 generate
+        np_sugup_data = np.flipud(np_sugup_data)
+        n5idx = n20idx = n60idx = 0
+        seryuk_arr = np_sugup_data[:, 9]
+        for i in range(np_sugup_data.shape[0]):
+            if i % 5 == 0:  n5idx = i
+            if i % 20 == 0: n20idx = i
+            if i % 60 == 0: n60idx = i
 
-        print(self.np_sugup_data)
+            np_sugup_data[i, 12] = np.mean(seryuk_arr[n5idx:n5idx+5])
+            np_sugup_data[i, 13] = np.mean(seryuk_arr[n20idx:n20idx + 20])
+            np_sugup_data[i, 14] = np.mean(seryuk_arr[n60idx:n60idx + 60])
+
+            # 수급주체별데이터 출력
+            # print(np_sugup_data[i])
+
+        print('수급데이터가 정상적으로 생성 되었습니다.')
+
+        # 데이터역정렬 (수급분석표 생성 때문에)
+        np_row_data = np.flipud(np_row_data)
+        self._make_sugup_analysis()
+
+    # 수급분석표 만들기
+    def _make_sugup_analysis(self):
+        print('수급분석표 만들기함수가 실행되었습니다')
+
+        # 조회해온 데이터의 년도측정(역정렬 상태)
+        start_year = '' + np_row_data[np_row_data[:, 1].size-1, 0]
+        start_year = datetime.strptime(start_year, "%Y%m%d")
+        start_year = start_year.strftime('%Y')
+
+        # 행의 수 (년도별 합계) 기본행의 수는 18 + 년도별에 따라 추가됨
+        print('년도의 수 : ', int(sYear), int(start_year))
+        rows_count = 18 + (int(sYear) - int(start_year))
+        print('년도의 수 : ', int(sYear) - int(start_year))
+        print('총 카운트 : ', rows_count)
+
+        self.rowDataTabWid.sugupTable.setRowCount(rows_count)
+        danga_arr = np.array(np_row_data[:, 1], dtype=int)  # 현재가 (부호없는 정수)
+        danga_arr = np.abs(danga_arr)
+
+        gerae_arr = np.array(np_row_data[:, 17], dtype=int)  # 거래량
+
+        # 테이블 데이터 박기
+        for i in range(rows_count):
+            if i < 5:
+                self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem(np_row_data[i, 0]))   # 일자
+                self.rowDataTabWid.sugupTable.setItem(i, 1, QTableWidgetItem(np_row_data[i, 1]))   # 평균단가
+                self.rowDataTabWid.sugupTable.setItem(i, 2, QTableWidgetItem(np_row_data[i, 17]))  # 거래량
+                self.rowDataTabWid.sugupTable.setItem(i, 3, QTableWidgetItem(np_row_data[i, 4]))   # 개인
+                self.rowDataTabWid.sugupTable.setItem(i, 5, QTableWidgetItem(np_row_data[i, 5]))   # 외국인
+                # 외국인 이후~
+                for sidx in range(6, 16):
+                    self.rowDataTabWid.sugupTable.setItem(i, sidx, QTableWidgetItem(np_row_data[i, sidx+1]))
+            if i in [5, 6, 7, 8]:
+                self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem(str(i-4) + '주'))
+                pd = np.mean(danga_arr[(((i - 4) * 5) - 5):((i - 4) * 5)])
+                self.rowDataTabWid.sugupTable.setItem(i, 1, QTableWidgetItem(str(np.int(pd))))  # 평균단가
+                gr = np.sum(gerae_arr[(((i - 4) * 5) - 5):((i - 4) * 5)])
+                self.rowDataTabWid.sugupTable.setItem(i, 2, QTableWidgetItem(str(np.int(gr))))  # 거래량
+
+
+            if i in [9, 10, 11]:
+                self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem(str(i - 8) + '달'))
+            if i in [12, 13, 14, 15]:
+                self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem(str(i - 11) + '분기'))
+            if i >= 16 and i < rows_count-2:
+                self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem(str(i - 15) + '년'))
+            if i == rows_count-2:
+                self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem("현재 보유량"))
+            if i == rows_count-1:
+                self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem("최대 보유량"))
+
+        # 보유량 계산
+        self._make_amount(rows_count)
+
+        print('수급분석표 생성이 완료되었습니다. ')
+
+    # 보유량 계산
+    def _make_amount(self, rows_count):
+        print('보유량 계산중....')
+        for idx in range(3, 16):
+            self.rowDataTabWid.sugupTable.setItem(rows_count - 2, idx, QTableWidgetItem(str(np_sugup_data[0, juche_analysis_dic[idx] + 2])))    # 현재 보유량
+            self.rowDataTabWid.sugupTable.setItem(rows_count - 1, idx, QTableWidgetItem(str(np_sugup_data[0, juche_analysis_dic[idx] + 3])))    # 최대 보유량(매집고점)
 
     # 수급 주체별 데이터 generator
     def _make_sugup_part_data(self, fromidx, rowidx):
-        print('fromidx : ', fromidx ,'rowidx : ' , rowidx)
+        for i in range(fromidx, (fromidx+6)):
 
-        for i in range(fromidx, fromidx+5):
+            # 세력 순매수 물량의 총합.
+            stock_data = int(np_row_data[rowidx, 5]) + int(np_row_data[rowidx, 7]) + int(np_row_data[rowidx, 8]) + \
+                         int(np_row_data[rowidx, 9]) + int(np_row_data[rowidx, 10]) + int(np_row_data[rowidx, 11]) + \
+                         int(np_row_data[rowidx, 12]) + int(np_row_data[rowidx, 13]) + int(np_row_data[rowidx, 14]) + \
+                         int(np_row_data[rowidx, 15])
+
             # 누적합
             if i == fromidx:
-                if rowidx == 0:      self.np_sugup_data[rowidx, fromidx] = self.np_row_data[rowidx, 4]
-                elif rowidx > 0:     self.np_sugup_data[rowidx, fromidx] = self.np_sugup_data[rowidx-1, i] + int(self.np_row_data[rowidx, 4])
+                if rowidx == 0:
+                    # 삼항연산자 a if test else b
+                    np_sugup_data[rowidx, i] = stock_data if fromidx == 7 else int(np_row_data[rowidx, juche_dic[fromidx]])
+                if rowidx > 0:
+                    np_sugup_data[rowidx, i] = np_sugup_data[rowidx-1, i] + (stock_data if fromidx == 7 else int(np_row_data[rowidx, juche_dic[fromidx]]))
             # 최고저점
             if i == fromidx+1:
-                if rowidx == 0:      self.np_sugup_data[rowidx, fromidx]= self.np_row_data[i, 4]
-                elif rowidx > 0:     self.np_sugup_data[rowidx, fromidx] = min(self.np_sugup_data[rowidx-1, i-1], self.np_sugup_data[rowidx, i-1])
+                if rowidx == 0:
+                    np_sugup_data[rowidx, i]= np_sugup_data[rowidx, i-1]
+                elif rowidx > 0:
+                    np_sugup_data[rowidx, i] = min(np_sugup_data[rowidx-1, i], np_sugup_data[rowidx, i-1])
             # 매집수량
-            if i == fromidx+2: self.np_sugup_data[rowidx, fromidx] = self.np_sugup_data[rowidx, i-2] - self.np_sugup_data[i, i-3]
+            if i == fromidx+2:
+                np_sugup_data[rowidx, i] = np_sugup_data[rowidx, i-2] - np_sugup_data[rowidx, i-1]
             # 매집고점
             if i == fromidx+3:
-                if rowidx == 0:      self.np_sugup_data[rowidx, fromidx] = self.np_sugup_data[rowidx, i-1]
-                elif rowidx > 0:     self.np_sugup_data[rowidx, fromidx] = max(self.np_sugup_data[rowidx-1, i], self.np_sugup_data[rowidx, i-1])
+                if rowidx == 0:
+                    np_sugup_data[rowidx, i] = np_sugup_data[rowidx, i-1]
+                elif rowidx > 0:
+                    np_sugup_data[rowidx, i] = max(np_sugup_data[rowidx-1, i], np_sugup_data[rowidx, i-1])
             # 분산비율
             if i == fromidx+4:
-                if self.np_sugup_data[rowidx, i-2] == 0 or self.np_sugup_data[rowidx, i-1] == 0:
-                    self.np_sugup_data[rowidx, fromidx] = 0
+                if np_sugup_data[rowidx, i-2] == 0 or np_sugup_data[rowidx, i-1] == 0:
+                    np_sugup_data[rowidx, i] = 0
                 else:
-                    self.np_sugup_data[rowidx, fromidx] = (self.np_sugup_data[rowidx, i-2] / self.np_sugup_data[rowidx, i-1]) * 100
+                    np_sugup_data[rowidx, i] = (np_sugup_data[rowidx, i-2] / np_sugup_data[rowidx, i-1]) * 100
 
     # 엑셀파일로 데이터 저장
     def savefile(self):
@@ -311,8 +411,8 @@ class RowDataTabWid(QWidget):
 
         # 두번째 탭 내용 생성 (데이터 가공 수급데이터)
         self.tab2.layout = QVBoxLayout(self)
-        self.sugupHeaders = ['거래량', '개인', '세력합', '외국인', '금융투자', '보험', '투신', '기타금융', '은행'
-                                    , '연기금', '사모펀드', '국가', '기타법인', '내외국인']
+        self.sugupHeaders = ['일자', '평균단가', '거래량', '개인', '세력합', '외국인', '금융투자', '보험', '투신',
+                             '기타금융', '은행', '연기금', '사모펀드', '국가', '기타법인', '내외국인']
 
         self.sugupTable = QTableWidget(0, self.sugupHeaders.__len__(), self)
         self.sugupTable.setRowHeight(0, 10)

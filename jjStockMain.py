@@ -1,4 +1,3 @@
-import sys
 import time
 import numpy as np
 import xlwt
@@ -6,9 +5,8 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QAxContainer import *
-from datetime import datetime
+from datetime import datetime, timedelta
 from tkinter import *
-from commonFunctions import *
 
 # 현재 시스템 날짜 (date)
 sYear = datetime.today().strftime('%Y')
@@ -30,15 +28,14 @@ juche_dic = {2:4, 7:6, 15:5, 20:7, 25:8, 30:9, 35:10, 40:11, 45:12, 50:13, 55:14
 # 수급분석표용 주체별 인덱스 추출 딕셔너리
 juche_analysis_dic = {3: 2, 4: 7, 5: 15, 6: 20, 7: 25, 8: 30, 9: 35, 10: 40, 11: 45, 12: 50, 13: 55, 14: 60, 15: 65}
 
-
 class MyWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-
         # Kiwoom Login
         self.kiwoom = QAxWidget("KHOPENAPI.KHOpenAPICtrl.1")
         self.kiwoom.dynamicCall("CommConnect()")
         self.kiwoom.OnReceiveTrData.connect(self._receive_tr_data)
+        self.kiwoom.OnEventConnect.connect(self.event_connect)
 
         self.setWindowTitle("JJstock")
         self.setGeometry(20, 50, 1800, 900)
@@ -48,30 +45,35 @@ class MyWindow(QMainWindow):
         btn1.setGeometry(244, 10, 60, 30)
         btn1.clicked.connect(self.btn1_clicked)
 
-        # 종목코드 입력 인풋.
+        # 종목코드명 검색 인풋.
         self.jongmokCode = QLineEdit(self)
-        self.jongmokCode.setText('089590')  ## 임시종목 후성.
+        self.jongmokCode.setText('')
         self.jongmokCode.move(10,10)
         self.jongmokCode.setAlignment(Qt.AlignHCenter)  # 텍스트 가운데 정렬
+        self.jongmokCode.setStyleSheet("QLineEdit{border:1px solid #B21016}")
+        self.jongmokCode.textEdited.connect(self._get_code_by_autocomplete)
+        # ime 모드를 한글로 바꿔보장 ㅠㅠ.
+
 
         # 날짜 표시 인풋
         self.cal_label = QLabel(self)
         self.cal_label.setGeometry(115, 11, 100, 28)
-        self.cal_label.setStyleSheet("QLabel{border:1px solid blue; background-color:#FAFAFA}") # 레이블 스타일링
-        # 날짜 레이블에는 기본적으로 오늘 데이터를 셋팅해놓는다.
-        self.cal_label.setText(sYear+'-'+sMonth+'-'+sDay)
+        self.cal_label.setStyleSheet("QLabel{border:1px solid #000000; background-color:#393939}") # 레이블 스타일링
+        # 날짜 레이블에는 기본적으로 하루전 데이터를 셋팅해놓는다.
+        self.cal_label.setText((datetime.today() + timedelta(days=-1)).strftime("%Y-%m-%d"))
 
         # 날짜선택 버튼에 이미지를 심어보자.
         self.calIcon = QIcon("getcal.png")
         self.cal_btn = QPushButton(self)
         self.cal_btn.setIcon(self.calIcon)
 
-        self.cal_btn.setGeometry(213, 10, 30, 30)
+        self.cal_btn.setGeometry(213, 11, 29, 28)
         self.cal_btn.setStyleSheet("QPushButton{background-color:black}")
         self.cal_btn.clicked.connect(self.cal_btn_clicked)
 
         self.cal = QCalendarWidget(self)
         self.cal.setGridVisible(True)
+        self.cal.setSelectedDate(datetime.today() + timedelta(days=-1))
         self.cal.setGeometry(10, 40, 260, 250)
         self.cal.clicked[QDate].connect(self.showDate)
         self.cal.hide()
@@ -82,31 +84,122 @@ class MyWindow(QMainWindow):
 
         # 종목별투자자기관별요청 데이터조회 테이블 확장 버튼 (컨트롤러의 선언순서에 따라 z-order가 달라진다)
         self.exp_dt_btn = QPushButton(self)
-        self.exp_dt_btn.setGeometry(600, 677, 600, 18)
+        self.exp_dt_btn.setGeometry(600, 680, 600, 18)
         self.exp_dt_btn.setText('▲')
         self.exp_dt_btn.clicked.connect(self.exp_dt_btn_clicked)
 
         # 엑셀 저장
         self.save_to_xls_btn = QPushButton(self)
-        self.save_to_xls_btn.setGeometry(1680, 677, 80, 24)
+        self.save_to_xls_btn.setGeometry(1704, 676, 80, 24)
         self.save_to_xls_btn.setText('엑셀저장')
         self.save_to_xls_btn.clicked.connect(self.savefile)
+
+        # 종목코드 검색 된 리스트
+        self.listWidgetSearched = QListWidget(self)
+        self.listWidgetSearched.move(10, 40)
+        self.listWidgetSearched.setFixedWidth(330)
+        self.listWidgetSearched.setFixedHeight(0)
+        self.listWidgetSearched.itemDoubleClicked.connect(self._code_item_clicked)
+
+        # 종목코드레이블
+        self.jongcodelbl = QLabel(self)
+        self.jongcodelbl.setGeometry(320, 10, 300, 30)
+
+        # 최초진입 로딩중 화면 구현
+        self.firstLoading = QLabel(self)
+        self.firstLoading.setGeometry(0, 0, 1800, 900)
+        self.firstLoading.setAlignment(Qt.AlignCenter)
+        self.firstLoading.setStyleSheet("QLabel{background-color:rgba(0, 0, 0, 0.7)}")
+        self.firstLoading.setText('로딩중...')
+
+        # 최초 로딩완료후 종목검색 인풋에 포커스
+        self.jongmokCode.setFocus()
+
+        # 데이터로딩중 화면 구현
+        self.rowDataLoading = QLabel(self)
+        self.rowDataLoading.setGeometry(0, 0, 0, 0)     # 우선은 안보임
+        self.rowDataLoading.setAlignment(Qt.AlignCenter)
+        self.rowDataLoading.setStyleSheet("QLabel{background-color:rgba(0, 0, 0, 0.7)}")
+
+    # ------------------ 키 이벤트 오버라이딩 -----------------
+    def keyPressEvent(self, event):
+        # print(event.key())
+
+        if event.key() == Qt.Key_Down:
+            # print('키다운 이벤트 발생')
+            if self.jongmokCode.hasFocus():
+                self.listWidgetSearched.setFocus()
+
+        # 엔터키 (사무실에서는 Key_Enter가 안먹음)
+        if event.key() == 16777220 or event.key() == Qt.Key_Enter:
+            # print('엔터키이벤트 발생')
+            if self.listWidgetSearched.hasFocus():
+                self._code_item_clicked(self.listWidgetSearched.currentItem())
+
+    def alert(self, text):
+        QMessageBox.about(self, "알림", text)
+
+    def _code_item_clicked(self, item):
+        setcode = ''
+        for keyv, valv in self.code_list_dic.items():
+            if valv == item.text():
+                setcode = keyv
+
+        self.jongmokCode.setText(item.text())
+        self.jongcodelbl.setText(setcode)
+        self.listWidgetSearched.setFixedHeight(0)
+
+    def _get_code_by_autocomplete(self):
+        self.listWidgetSearched.clear()
+        viewCodeList = []
+        for slist in self.code_list_dic.values():
+            if self.jongmokCode.text() in slist:
+                viewCodeList.append(slist)
+        if len(viewCodeList) * 24 >= 240:
+            self.listWidgetSearched.setFixedHeight(240)
+        else:
+            self.listWidgetSearched.setFixedHeight(len(viewCodeList) * 24)
+        self.listWidgetSearched.addItems(viewCodeList)
+
+    def event_connect(self, err_code):
+        if err_code == 0:       # 로그인 성공시 메소드
+            print("로그인 성공")
+
+            # 종목코드 리스트 조회 코스피
+            coderet = self.kiwoom.dynamicCall("GetCodeListByMarket(QString)", ['0'])
+            codelist = coderet.split(';')
+            self.kospi_code_name_list = []
+
+            self.code_list_dic = {}
+
+            for x in codelist:
+                name = self.kiwoom.dynamicCall("GetMasterCodeName(QString)", [x])
+                self.code_list_dic[x] = name
+
+            # 종목코드 리스트 조회 코스닥
+            coderet2 = self.kiwoom.dynamicCall("GetCodeListByMarket(QString)", ['10'])
+            codelist2 = coderet2.split(';')
+            for x2 in codelist2:
+                name = self.kiwoom.dynamicCall("GetMasterCodeName(QString)", [x2])
+                self.code_list_dic[x2] = name
+
+            print('종목코드 리스트 가져오기가 성공하였습니다.')
+
+            self.firstLoading.setGeometry(0, 0, 0, 0)   # 로딩중화면 감춤.
 
     # 종목별투자자기관별 리스트 테이블 확장 버튼 클릭시.
     def exp_dt_btn_clicked(self):
         thei = self.rowDataTabWid.height()
         if thei == 240:
-            self.rowDataTabWid.setGeometry(5, 500, OBJECT_WIDTH_MAX_SIZE+10, 400)
-            self.exp_dt_btn.move(600, 517)
+            self.rowDataTabWid.setGeometry(5, 400, OBJECT_WIDTH_MAX_SIZE+10, 500)
+            self.exp_dt_btn.move(600, 420)
             self.exp_dt_btn.setText('▼')
-            self.save_to_xls_btn.setGeometry(1680, 517, 80, 24)
+            self.save_to_xls_btn.setGeometry(1704, 416, 80, 24)
         else:
             self.rowDataTabWid.setGeometry(5, 660, OBJECT_WIDTH_MAX_SIZE+10, 240)
-            self.exp_dt_btn.move(600, 677)
+            self.exp_dt_btn.move(600, 680)
             self.exp_dt_btn.setText('▲')
-            self.save_to_xls_btn.setGeometry(1680, 677, 80, 24)
-
-    # 수급분석차트를 그리기 위한 수급주체별데이터 생성 완료
+            self.save_to_xls_btn.setGeometry(1704, 676, 80, 24)
 
     # 날짜 레이블 클릭
     def cal_btn_clicked(self):
@@ -123,13 +216,22 @@ class MyWindow(QMainWindow):
             self.cal.hide()
 
     def btn1_clicked(self):
+
+        if self.jongcodelbl.text() == '':
+            QMessageBox.about(self, "JJStock", "종목을 검색해주세요")
+            return
+
         # 조회전 기존 데이터 리셋.
         self.rowDataTabWid.dataTable.setRowCount(0)
+        self.rowDataLoading.setGeometry(0, 0, 1800, 900)
+        self.rowDataLoading.setText('로딩중 ')
+
         rowdatas.clear()
         print('data load started.', end='')
         # 종목별투자자기관별요청
+
         self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "일자", self.cal_label.text().replace('-', ''))
-        self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "종목코드", self.jongmokCode.text())
+        self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "종목코드", self.jongcodelbl.text())
         self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "금액수량구분", "2")
         self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "매매구분", "0")
         self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "단위구분", "1")
@@ -139,7 +241,7 @@ class MyWindow(QMainWindow):
             time.sleep(TR_REQ_TIME_INTERVAL)
             # 이전 tr에서 마지막으로 저장한 날짜를 셋팅함. (self.lasted_date)
             self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "일자", self.lasted_date)
-            self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "종목코드", self.jongmokCode.text())
+            self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "종목코드", self.jongcodelbl.text())
             self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "금액수량구분", "2")
             self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "매매구분", "0")
             self.kiwoom.dynamicCall("SetInputValue(QString, QString)", "단위구분", "1")
@@ -184,7 +286,7 @@ class MyWindow(QMainWindow):
                 one_row_arr.append(getdata)
                 self.rowDataTabWid.dataTable.setItem(crrOfRow, colidx,QTableWidgetItem(getdata))
                 if colidx not in [0, 17]:
-                    self._set_cell_style(crrOfRow, colidx, self.rowDataTabWid.dataTable.item(crrOfRow, colidx).text())
+                    self._set_cell_style(crrOfRow, colidx, self.rowDataTabWid.dataTable.item(crrOfRow, colidx).text(), self.rowDataTabWid.dataTable, 'N')
                 colidx += 1
                 self.lasted_date = self._comm_get_data(trcode, "", rqname, i, '일자')
 
@@ -194,6 +296,10 @@ class MyWindow(QMainWindow):
             print('data load ended.')
             self._make_sugup_data()
         else:
+            if len(self.rowDataLoading.text()) < 12:
+                self.rowDataLoading.setText(self.rowDataLoading.text() + '.')
+            else:
+                self.rowDataLoading.setText('로딩중 ')
             print('.', end='')
 
     # 데이터 가져오기 함수
@@ -206,16 +312,24 @@ class MyWindow(QMainWindow):
         ret = self.kiwoom.dynamicCall("GetRepeatCnt(QString, QString)", trcode, rqname)
         return ret
 
-    # 컬럼 폰트 스타일 설정
-    def _set_cell_style(self, row, col, value):
-        if value != '0':
+    # 테이블컬럼 스타일 설정
+    def _set_cell_style(self, row, col, value, totab, formatyn):
+        # TODO 스타일설정
+        if formatyn == 'Y':
+            if len(totab.item(row, col).text()) >= (4 if value[:1] == '+' or value[:1] != '-' else 5):
+                totab.setItem(row, col, QTableWidgetItem(format(int(totab.item(row, col).text()), ',')))
+
+        totab.item(row, col).setTextAlignment(Qt.AlignRight)
+
+        if value != '0' and value != '':
             if value[:1] == '+' or value[:1] != '-':
-                self.rowDataTabWid.dataTable.item(row, col).setForeground(QColor(255, 0 ,0))
+                totab.item(row, col).setForeground(QColor(255, 127, 39))
             if value[:1] == '-':
-                self.rowDataTabWid.dataTable.item(row, col).setForeground(QColor(0, 0, 255))
+                totab.item(row, col).setForeground(QColor(148, 216, 246))
 
     # 수급 데이터 만들기
     def _make_sugup_data(self):
+        self.rowDataLoading.setText('수급데이터 만들기함수가 실행되었습니다.')
         print('수급데이터 만들기함수가 실행되었습니다.')
         # 로우데이터 데이터를 ndarray객체로 만든다. ndarray객체가 수치계산에 더 빠르게 때문이다.
         global np_row_data
@@ -256,26 +370,32 @@ class MyWindow(QMainWindow):
         np_row_data = np.flipud(np_row_data)
         self._make_sugup_analysis()
 
-    # 수급분석표 만들기
+    # ----------------------------------------------- 수급분석표 만들기 ------------------------------------------------
     def _make_sugup_analysis(self):
         print('수급분석표 만들기함수가 실행되었습니다')
-
+        self.rowDataLoading.setText('수급분석표 만들기함수가 실행되었습니다.')
         # 조회해온 데이터의 년도측정(역정렬 상태)
         start_year = '' + np_row_data[np_row_data[:, 1].size-1, 0]
         start_year = datetime.strptime(start_year, "%Y%m%d")
         start_year = start_year.strftime('%Y')
 
         # 행의 수 (년도별 합계) 기본행의 수는 18 + 년도별에 따라 추가됨
-        print('년도의 수 : ', int(sYear), int(start_year))
         rows_count = 18 + (int(sYear) - int(start_year))
-        print('년도의 수 : ', int(sYear) - int(start_year))
-        print('총 카운트 : ', rows_count)
+        print('년도의 수 : ', int(sYear) - int(start_year), '/ 총 카운트 : ', rows_count)
 
         self.rowDataTabWid.sugupTable.setRowCount(rows_count)
-        danga_arr = np.array(np_row_data[:, 1], dtype=int)  # 현재가 (부호없는 정수)
-        danga_arr = np.abs(danga_arr)
+        danga_arr = np.abs(np.array(np_row_data[:, 1], dtype=int)) # 현재가 (부호없는 정수)
+        trade_arr = np.array(np_row_data[:, 17], dtype=int)  # 거래량
 
-        gerae_arr = np.array(np_row_data[:, 17], dtype=int)  # 거래량
+        # 수급분석표 세력합 데이터 generator
+        seryukhap_arr = np.zeros(np_row_data.shape[0], dtype=int)
+        global rowsum
+        for ix in range(np_row_data.shape[0]):
+            rowsum = 0
+            for jx in [5, 7, 8, 9, 10, 11, 12, 13, 15]:
+                rowsum += int(np_row_data[ix, jx])
+            seryukhap_arr[ix] = rowsum
+        # print('seryukhap_arr : ', seryukhap_arr)
 
         # 테이블 데이터 박기
         for i in range(rows_count):
@@ -284,33 +404,102 @@ class MyWindow(QMainWindow):
                 self.rowDataTabWid.sugupTable.setItem(i, 1, QTableWidgetItem(np_row_data[i, 1]))   # 평균단가
                 self.rowDataTabWid.sugupTable.setItem(i, 2, QTableWidgetItem(np_row_data[i, 17]))  # 거래량
                 self.rowDataTabWid.sugupTable.setItem(i, 3, QTableWidgetItem(np_row_data[i, 4]))   # 개인
+                self.rowDataTabWid.sugupTable.setItem(i, 4, QTableWidgetItem(str(seryukhap_arr[i])))    # 세력합
                 self.rowDataTabWid.sugupTable.setItem(i, 5, QTableWidgetItem(np_row_data[i, 5]))   # 외국인
+
                 # 외국인 이후~
                 for sidx in range(6, 16):
                     self.rowDataTabWid.sugupTable.setItem(i, sidx, QTableWidgetItem(np_row_data[i, sidx+1]))
+
             if i in [5, 6, 7, 8]:
                 self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem(str(i-4) + '주'))
+
                 pd = np.mean(danga_arr[(((i - 4) * 5) - 5):((i - 4) * 5)])
                 self.rowDataTabWid.sugupTable.setItem(i, 1, QTableWidgetItem(str(np.int(pd))))  # 평균단가
-                gr = np.sum(gerae_arr[(((i - 4) * 5) - 5):((i - 4) * 5)])
+                gr = np.sum(trade_arr[(((i - 4) * 5) - 5):((i - 4) * 5)])
                 self.rowDataTabWid.sugupTable.setItem(i, 2, QTableWidgetItem(str(np.int(gr))))  # 거래량
+                self.rowDataTabWid.sugupTable.setItem(i, 3, QTableWidgetItem(str(np.int(self._make_juche_array(4, 5, i, 4, int, 'sum')))))  # 개인
+                self.rowDataTabWid.sugupTable.setItem(i, 4, QTableWidgetItem(str(np.sum(seryukhap_arr[(((i - 4) * 5) - 5):((i - 4) * 5)]))))  # 세력합
+                self.rowDataTabWid.sugupTable.setItem(i, 5, QTableWidgetItem(str(np.int(self._make_juche_array(4, 5, i, 5, int, 'sum')))))  # 외국인
 
+                # 외국인 이후 ~
+                for sidx in range(6, 16):
+                    self.rowDataTabWid.sugupTable.setItem(i, sidx, QTableWidgetItem(str(np.int(self._make_juche_array(4, 5, i, sidx+1, int, 'sum')))))
 
             if i in [9, 10, 11]:
                 self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem(str(i - 8) + '달'))
+
+                pd = np.mean(danga_arr[(((i - 8) * 20) - 20):((i - 8) * 20)])
+                self.rowDataTabWid.sugupTable.setItem(i, 1, QTableWidgetItem(str(np.int(pd))))  # 평균단가
+                gr = np.sum(trade_arr[(((i - 8) * 20) - 20):((i - 8) * 20)])
+                self.rowDataTabWid.sugupTable.setItem(i, 2, QTableWidgetItem(str(np.int(gr))))  # 거래량
+                self.rowDataTabWid.sugupTable.setItem(i, 3, QTableWidgetItem(str(np.int(self._make_juche_array(8, 20, i, 4, int, 'sum')))))  # 개인
+                self.rowDataTabWid.sugupTable.setItem(i, 4, QTableWidgetItem(str(np.sum(seryukhap_arr[(((i - 8) * 20) - 20):((i - 8) * 20)]))))  # 세력합
+                self.rowDataTabWid.sugupTable.setItem(i, 5, QTableWidgetItem(str(np.int(self._make_juche_array(8, 20, i, 5, int, 'sum')))))  # 외국인
+
+                # 외국인 이후 ~
+                for sidx in range(6, 16):
+                    self.rowDataTabWid.sugupTable.setItem(i, sidx, QTableWidgetItem(str(np.int(self._make_juche_array(8, 20, i, sidx + 1, int, 'sum')))))
+
             if i in [12, 13, 14, 15]:
                 self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem(str(i - 11) + '분기'))
+
+                pd = np.mean(danga_arr[(((i - 11) * 60) - 60):((i - 11) * 60)])
+                self.rowDataTabWid.sugupTable.setItem(i, 1, QTableWidgetItem(str(np.int(pd))))  # 평균단가
+                gr = np.sum(trade_arr[(((i - 11) * 60) - 60):((i - 11) * 60)])
+                self.rowDataTabWid.sugupTable.setItem(i, 2, QTableWidgetItem(str(np.int(gr))))  # 거래량
+                self.rowDataTabWid.sugupTable.setItem(i, 3, QTableWidgetItem(str(np.int(self._make_juche_array(11, 60, i, 4, int, 'sum')))))  # 개인
+                self.rowDataTabWid.sugupTable.setItem(i, 4, QTableWidgetItem(str(np.sum(seryukhap_arr[(((i - 11) * 60) - 60):((i - 11) * 60)]))))  # 세력합
+                self.rowDataTabWid.sugupTable.setItem(i, 5, QTableWidgetItem(str(np.int(self._make_juche_array(11, 60, i, 5, int, 'sum')))))  # 외국인
+
+                # 외국인 이후 ~
+                for sidx in range(6, 16):
+                    self.rowDataTabWid.sugupTable.setItem(i, sidx, QTableWidgetItem(str(np.int(self._make_juche_array(11, 60, i, sidx + 1, int, 'sum')))))
+
             if i >= 16 and i < rows_count-2:
                 self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem(str(i - 15) + '년'))
+
+                pd = np.mean(danga_arr[(((i - 15) * 240) - 240):((i - 15) * 240)])
+                self.rowDataTabWid.sugupTable.setItem(i, 1, QTableWidgetItem(str(np.int(pd))))  # 평균단가
+                gr = np.sum(trade_arr[(((i - 15) *  240) - 240):((i - 15) * 240)])
+                self.rowDataTabWid.sugupTable.setItem(i, 2, QTableWidgetItem(str(np.int(gr))))  # 거래량
+                self.rowDataTabWid.sugupTable.setItem(i, 3, QTableWidgetItem(str(np.int(self._make_juche_array(15, 240, i, 4, int, 'sum')))))  # 개인
+                self.rowDataTabWid.sugupTable.setItem(i, 4, QTableWidgetItem(str(np.sum(seryukhap_arr[(((i - 15) * 240) - 240):((i - 15) * 240)]))))  # 세력합
+                self.rowDataTabWid.sugupTable.setItem(i, 5, QTableWidgetItem(str(np.int(self._make_juche_array(15, 240, i, 5, int, 'sum')))))  # 외국인
+
+                # 외국인 이후 ~
+                for sidx in range(6, 16):
+                    self.rowDataTabWid.sugupTable.setItem(i, sidx, QTableWidgetItem(str(np.int(self._make_juche_array(15, 240, i, sidx + 1, int, 'sum')))))
+
             if i == rows_count-2:
-                self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem("현재 보유량"))
+                self.rowDataTabWid.sugupTable.setItem(i, 2, QTableWidgetItem("현재 보유량"))
             if i == rows_count-1:
-                self.rowDataTabWid.sugupTable.setItem(i, 0, QTableWidgetItem("최대 보유량"))
+                self.rowDataTabWid.sugupTable.setItem(i, 2, QTableWidgetItem("최대 보유량"))
+
+            if i < rows_count-2:
+                for cssidx in range(3, 16):
+                    self._set_cell_style(i, cssidx, self.rowDataTabWid.sugupTable.item(i, cssidx).text(),self.rowDataTabWid.sugupTable, 'Y')
+
+            self.rowDataTabWid.sugupTable.setRowHeight(i, 10)
+
 
         # 보유량 계산
         self._make_amount(rows_count)
 
         print('수급분석표 생성이 완료되었습니다. ')
+        self.rowDataLoading.setText('수급분석표 만들기함수가 실행되었습니다.')
+        self.rowDataLoading.setGeometry(0, 0, 0, 0)
+    # -------------------------------------------- 수급분석표 만들기 END -----------------------------------------------
+
+
+
+    # 수급테이블 2차원 배열로부터 특정 열데이터를 추출하여 배열생성
+    def _make_juche_array(self, minuspoint, period, rowidx, createcolidx, dtypes, mathtool):
+        returnarr = np.array(np_row_data[:, createcolidx], dtype=dtypes)
+        if mathtool == 'mean':
+            return np.mean(returnarr[(((rowidx - minuspoint) * period) - period):((rowidx - minuspoint) * period)])
+        elif mathtool == 'sum':
+            return np.sum(returnarr[(((rowidx - minuspoint) * period) - period):((rowidx - minuspoint) * period)])
 
     # 보유량 계산
     def _make_amount(self, rows_count):
@@ -360,10 +549,15 @@ class MyWindow(QMainWindow):
 
     # 엑셀파일로 데이터 저장
     def savefile(self):
+        if self.rowDataTabWid.dataTable.rowCount() == 0:
+            self.alert('대상 데이터가 로드되지 않았습니다. 종목검색을 먼저 실행해주십시오.')
+            return
+
+        ## 수정합시다으아~
         wbk = xlwt.Workbook()
         sheet = wbk.add_sheet("sheet 1", cell_overwrite_ok=True)
         self.add2(sheet)
-        wbk.save("/Users/pconn/Desktop/export.xlsx")
+        wbk.save("/Users/pconn/Desktop/export.xls")
 
     def add2(self, sheet):
         for currentColumn in range(self.rowDataTabWid.dataTable.columnCount()):
@@ -373,6 +567,7 @@ class MyWindow(QMainWindow):
                     sheet.write(currentRow, currentColumn, teext)
                 except AttributeError:
                     pass
+        self.alert('엑셀데이터 생성이 완료되었습니다.')
 
 # PyQt5의 QTableWidget을 이용한 탭메뉴 구성
 class RowDataTabWid(QWidget):
@@ -431,10 +626,28 @@ class RowDataTabWid(QWidget):
             print(currentQTableWidgetItem.row(), currentQTableWidgetItem.column(), currentQTableWidgetItem.text())
 
 
-
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    app.setStyle('Fusion')
+    # ------------------------- 스타일 테마설정 -----------------------------
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor(53, 53, 53))
+    palette.setColor(QPalette.WindowText, Qt.white)
+    palette.setColor(QPalette.Base, QColor(15, 15, 15))
+    palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+    palette.setColor(QPalette.ToolTipBase, Qt.white)
+    palette.setColor(QPalette.ToolTipText, Qt.white)
+    palette.setColor(QPalette.Text, Qt.white)
+    palette.setColor(QPalette.Button, QColor(53, 53, 53))
+    palette.setColor(QPalette.ButtonText, Qt.white)
+    palette.setColor(QPalette.BrightText, Qt.red)
+
+    palette.setColor(QPalette.Highlight, QColor(142, 45, 197).lighter())
+    palette.setColor(QPalette.HighlightedText, Qt.black)
+    app.setPalette(palette)
+    # ------------------------- 스타일 테마설정 끝 -----------------------------
+
     myWindow = MyWindow()
     myWindow.show()
     app.exec_()

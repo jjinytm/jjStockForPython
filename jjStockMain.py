@@ -1,12 +1,18 @@
 import time
+import webbrowser
 import numpy as np
 import xlwt
+import requests
+import chardet
+import bs4
+
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QAxContainer import *
 from datetime import datetime, timedelta
 from tkinter import *
+from urllib import parse
 
 # 현재 시스템 날짜 (date)
 sYear = datetime.today().strftime('%Y')
@@ -31,13 +37,16 @@ juche_analysis_dic = {3: 2, 4: 7, 5: 15, 6: 20, 7: 25, 8: 30, 9: 35, 10: 40, 11:
 class MyWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        # ------------------------------------------------- init ----------------------------------------------------- #
+
         # Kiwoom Login
         self.kiwoom = QAxWidget("KHOPENAPI.KHOpenAPICtrl.1")
         self.kiwoom.dynamicCall("CommConnect()")
         self.kiwoom.OnReceiveTrData.connect(self._receive_tr_data)
         self.kiwoom.OnEventConnect.connect(self.event_connect)
 
-        self.setWindowTitle("JJstock")
+        self.setWindowTitle("JJstock Analysis")
         self.setGeometry(20, 50, 1800, 900)
 
         # 조회버튼
@@ -78,7 +87,11 @@ class MyWindow(QMainWindow):
         self.cal.clicked[QDate].connect(self.showDate)
         self.cal.hide()
 
-        # 탭메뉴 추가
+        # 화면중앙 리포트 and 뉴스 탭메뉴
+        self.newsDataTabWid = NewsDataTabWid(self)
+        self.newsDataTabWid.setGeometry(5, 400, 700, 280)
+
+        # 로우데이터/수급분석표 탭메뉴
         self.rowDataTabWid = RowDataTabWid(self)
         self.rowDataTabWid.setGeometry(5, 660, OBJECT_WIDTH_MAX_SIZE+10, 240)
 
@@ -121,6 +134,8 @@ class MyWindow(QMainWindow):
         self.rowDataLoading.setAlignment(Qt.AlignCenter)
         self.rowDataLoading.setStyleSheet("QLabel{background-color:rgba(0, 0, 0, 0.7)}")
 
+        # ------------------------------------------------- 끝 ----------------------------------------------------- #
+
     # ------------------ 키 이벤트 오버라이딩 -----------------
     def keyPressEvent(self, event):
         # print(event.key())
@@ -148,6 +163,7 @@ class MyWindow(QMainWindow):
         self.jongmokCode.setText(item.text())
         self.jongcodelbl.setText(setcode)
         self.listWidgetSearched.setFixedHeight(0)
+        self.btn1_clicked()     # 선택이되면 바로 조회 실행함.
 
     def _get_code_by_autocomplete(self):
         self.listWidgetSearched.clear()
@@ -489,8 +505,63 @@ class MyWindow(QMainWindow):
         print('수급분석표 생성이 완료되었습니다. ')
         self.rowDataLoading.setText('수급분석표 만들기함수가 실행되었습니다.')
         self.rowDataLoading.setGeometry(0, 0, 0, 0)
+
+        # 증권리포트 가져오기 함수 실행
+        self.getReportWebCrawling()
     # -------------------------------------------- 수급분석표 만들기 END -----------------------------------------------
 
+    # 다운로드 링크열기
+    def getDownload(self, item):
+        chrome_path = 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe %s'
+        if item.column() == 4:
+            webbrowser.get(chrome_path).open_new("http://hkconsensus.hankyung.com" + item.text())
+
+    # 증권리포트 크롤링 함수
+    def getReportWebCrawling(self):
+        self.newsDataTabWid.reportDataTable.setRowCount(0)
+
+        mainUrl = 'http://hkconsensus.hankyung.com/apps.analysis/analysis.list?'
+        pSdate = datetime.now() - timedelta(days=360)       # 1년치 데이터만
+        pSdate = pSdate.strftime('%Y-%m-%d')
+        pEdate = sYear + '-' + sMonth + '-' + sDay
+        paramsArr = []
+        paramsArr.append('sdate=')
+        paramsArr.append(pSdate)
+        paramsArr.append('&edate=')
+        paramsArr.append(pEdate)
+        paramsArr.append('&now_page=1')
+        paramsArr.append('&pagenum=1000')   # 가져오는 갯수. 거의 무한대로 지정해서 다 가져오자.
+        paramsArr.append('&search_text=')
+        paramsArr.append(parse.quote(str.encode(self.jongmokCode.text(), 'euc-kr')))
+        url = mainUrl + ("".join(paramsArr))
+        print("증권리포트 크롤링 url : ", url)
+
+        # header 특히 User-Agent가 있어야 함
+        report_url_headers = {'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                              'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.84 Safari/537.36'
+                              }
+
+        source_code = requests.get(url, headers=report_url_headers)
+        source_code.encoding = 'euc-kr'
+        # print(source_code.text)
+        bs = bs4.BeautifulSoup(source_code.text, 'html.parser')
+        mbody = bs.select('div.table_style01 table tbody tr')
+
+        self.newsDataTabWid.reportDataTable.itemDoubleClicked.connect(self.getDownload)
+
+        for ix in range(len(mbody)):
+            crrOfRow = self.newsDataTabWid.reportDataTable.rowCount()
+            one_row = mbody[ix].find_all('td')
+            # 테이블 한줄 생성.
+            self.newsDataTabWid.reportDataTable.setRowCount(crrOfRow + 1)
+            self.newsDataTabWid.reportDataTable.setRowHeight(crrOfRow, 10)
+            self.newsDataTabWid.reportDataTable.setItem(crrOfRow, 0, QTableWidgetItem(one_row[0].getText()))    # 작성일
+            self.newsDataTabWid.reportDataTable.setItem(crrOfRow, 1, QTableWidgetItem(one_row[1].getText()))    # 분류
+            self.newsDataTabWid.reportDataTable.setItem(crrOfRow, 2, QTableWidgetItem(one_row[2].getText()))    # 제목
+            self.newsDataTabWid.reportDataTable.setItem(crrOfRow, 3, QTableWidgetItem(one_row[4].getText()))    # 출처(3인덱스는 담당자명)
+            self.newsDataTabWid.reportDataTable.setItem(crrOfRow, 4, QTableWidgetItem(one_row[5].find('a').get('href')))    # 첨부파일
+
+        print("증권리포트 크롤링이 완료되었습니다.")
 
 
     # 수급테이블 2차원 배열로부터 특정 열데이터를 추출하여 배열생성
@@ -569,6 +640,50 @@ class MyWindow(QMainWindow):
                     pass
         self.alert('엑셀데이터 생성이 완료되었습니다.')
 
+
+# 뉴스/리포트 탭 메뉴 규성
+class NewsDataTabWid(QWidget):
+    def __init__(self, parent):
+        super(QWidget, self).__init__(parent)
+        self.layout = QVBoxLayout(self)
+
+        # 탭 스크린 초기화
+        self.newsTabs = QTabWidget()
+        self.newsTab1 = QWidget()
+        self.newsTab2 = QWidget()
+
+        # 탭 추가
+        self.newsTabs.addTab(self.newsTab1, "증권리포트")
+        self.newsTabs.addTab(self.newsTab2, "뉴스")
+
+        # 증권리포트 탭 내용 생성
+        self.reportHeaders = ['작성일', '분류', '제목', '출처', '첨부']
+        self.reportDataTable = QTableWidget(0, self.reportHeaders.__len__(), self)
+        # self.reportDataTable.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.reportDataTable.setHorizontalHeaderLabels(self.reportHeaders)
+        self.reportDataTable.setColumnWidth(0, 100)
+        self.reportDataTable.setColumnWidth(1, 60)
+        self.reportDataTable.setColumnWidth(2, 280)
+        self.reportDataTable.setColumnWidth(3, 100)
+        self.reportDataTable.setColumnWidth(4, 60)
+        self.reportDataTable.setRowCount(1)
+        self.reportDataTable.setRowHeight(0, 10)
+        self.reportDataTable.setItem(0, 2, QTableWidgetItem('조회된 데이터가 없습니다.'))
+
+        self.newsTab1.layout = QVBoxLayout(self)
+        self.newsTab1.layout.addWidget(self.reportDataTable)
+        self.newsTab1.setLayout(self.newsTab1.layout)
+
+        # 뉴스 탭 내용 생성
+        self.newsDataTable = QTableWidget(0, 5, self)
+        self.newsTab2.layout = QVBoxLayout(self)
+        self.newsTab2.layout.addWidget(self.newsDataTable)
+        self.newsTab2.setLayout(self.newsTab2.layout)
+
+        self.layout.addWidget(self.newsTabs)
+        self.setLayout(self.layout)
+
+
 # PyQt5의 QTableWidget을 이용한 탭메뉴 구성
 class RowDataTabWid(QWidget):
     def __init__(self, parent):
@@ -628,7 +743,6 @@ class RowDataTabWid(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
     app.setStyle('Fusion')
     # ------------------------- 스타일 테마설정 -----------------------------
     palette = QPalette()

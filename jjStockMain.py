@@ -87,7 +87,12 @@ class MyWindow(QMainWindow):
         self.cal.clicked[QDate].connect(self.showDate)
         self.cal.hide()
 
-        # 화면중앙 리포트 and 뉴스 탭메뉴
+        # 수급 그래픽 데이터 테이블
+        self.sugupGUIHeaders = ['', '개인', '세력합', '외국인', '증권', '보험']
+        self.sugupGUItable = QTableWidget(0, 14, self)
+        self.sugupGUItable.setGeometry(700, 40, 1084, 200)
+
+        # 리포트 and 뉴스 탭메뉴
         self.newsDataTabWid = NewsDataTabWid(self)
         self.newsDataTabWid.setGeometry(5, 400, 700, 280)
 

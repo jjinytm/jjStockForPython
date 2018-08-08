@@ -1,7 +1,10 @@
-##### 공통적으로 사용할 함수들 모음
+"""
+공통함수 모음
+"""
+__all__ = ["_get_connection_state"]
 
-class RqFunc:
 
-    ## commRqData -- tr요청
-    def _comm_rq_data(self, rqname, trcode, next, screenNo):
-        self.kiwoom.dynamicCall("CommRqData(QString, QString, int, QString)", rqname, trcode, next, screenNo)
+# 통신접속상태 확인
+def _get_connection_state(kiwoom):
+    state = kiwoom.dynamicCall("GetConnectState()")
+    return state

@@ -7,6 +7,9 @@ import bs4
 import warnings
 import math
 import commonFunctions.RqFunc as func
+import webview
+import wx
+import wx.html2
 
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
@@ -86,6 +89,17 @@ class MyWindow(QMainWindow):
         # 관심종목 / 잔고 탭
         self.accountAndFavorite = AccountAndFavorite(self)
         self.accountAndFavorite.setGeometry(5, 40, 620, 380)
+
+        # 실시간 조회 데이터 set / remove 버튼
+        self.real_set_btn = QPushButton(self)
+        self.real_set_btn.setText('잔고 set')
+        self.real_set_btn.setGeometry(440, 53, 80, 26)
+        self.real_set_btn.clicked.connect(self.account_real_set)
+        self.real_cls_btn = QPushButton(self)
+        self.real_cls_btn.setText('잔고 end')
+        self.real_cls_btn.setGeometry(520, 53, 80, 26)
+        self.real_cls_btn.clicked.connect(self.account_real_cls)
+
 
         # 수급 그래픽 데이터 테이블
         self.sugupGUIHeaders = ['', '개인', '세력합', '외국인', '금융투자', '보험', '투신', '기타금융', '은행', '연기금'\
@@ -170,6 +184,43 @@ class MyWindow(QMainWindow):
         self.rowDataLoading.setAlignment(Qt.AlignCenter)
         self.rowDataLoading.setStyleSheet("QLabel{background-color:rgba(0, 0, 0, 0.7)}")
         # ------------------------------------------------- 끝 ----------------------------------------------------- #
+
+    # 실시간 잔고 요청 버튼클릭
+    def account_real_set(self):
+        print('실시간 잔고 요청을 등록합니다.')
+        self._set_real_reg("001", "064350;045390", "10;930;931", "0")
+
+    # 실시간 데이터 요청 메서드
+    def _set_real_reg(self, screen_no, code, fid, str_real_type):
+        """
+        :param screen_no:
+        :param code:
+        :param fid:
+        :param str_real_type: 0이면 첫 실시간 데이터 요청, 1이면 추가등록
+        :return:
+        """
+        # 실시간 데이터를 요청하기전 커넥션이 맺어져 있는지 확인한다.
+        if not func._get_connection_state(self.kiwoom):
+            self.alert('키움서버에 연결되어 있지 않습니다. 프로그램을 재 실행해 주십시오.')
+        else:
+            print('연결이 되어 있습니다.')
+
+        self.kiwoom.dynamicCall("SetRealReg(QString, QString, QString, QString)", screen_no, code, fid, str_real_type)
+
+    # 실시간 응답 처리
+    def _receive_real_data(self, code, realtype, realdata):
+        # 실시간 응답처리 개발중 (실시간성이라 장중에만 테스트가 가능하여 장중에만 개발가능함...)
+        if realtype == "주식체결":
+            print(self._get_comm_real_data("045390", 10))
+
+    # 실시간요청 응답 데이터
+    def _get_comm_real_data(self, realtype, fid):
+        self.kiwoom.dynamicCall("GetCommRealData(QString, int)", realtype, fid)
+
+    # 실시간 잔고 요청 취소클릭
+    def account_real_cls(self):
+        print('실시간 요청 취소합니다.')
+        self._set_real_remove("ALL", "ALL")
 
     # ------------------ 키 이벤트 오버라이딩 -----------------
     def keyPressEvent(self, event):
@@ -324,29 +375,13 @@ class MyWindow(QMainWindow):
         except AttributeError:
             pass
 
-    # 실시간 응답 처리
-    def _receive_real_data(self):
-        """
-        실시간 데이터 응답 처리
-        setRealReg()        : 실시간 데이터 요청
-        getCommRealData()   : 실시간 데이터를 얻을때 사용.
-        를 통해 요청 된 것.
-        """
-
-    # 실시간 데이터 요청 메서드
-    def _set_real_reg(self, screen_no, code, fid, str_real_type):
-        """
-        :param screen_no:
-        :param code:
-        :param fid:
-        :param str_real_type: 0이면 첫 실시간 데이터 요청, 1이면 추가등록
-        :return:
-        """
-        # 실시간 데이터를 요청하기전 커넥션이 맺어져 있는지 확인한다.
+    # 실시간 데이터 중지 메서드
+    def _set_real_remove(self, screen_no, code):
+        # 통신상태 확인
         if not func._get_connection_state(self.kiwoom):
             self.alert('키움서버에 연결되어 있지 않습니다. 프로그램을 재 실행해 주십시오.')
 
-
+        self.kiwoom.dynamicCall("SetRealRemove(QString, QString)", screen_no, code)
 
     # 종목별투자자별 리스트 응답 후 처리
     def _opt10059_set(self, rqname, trcode):
@@ -827,15 +862,34 @@ class ChartTabWid(QWidget):
         self.chartTab1 = QWidget()
         self.chartTab2 = QWidget()
         self.chartTab3 = QWidget()
+        self.chartTab4 = QWidget()
 
         # 탭 추가
         self.chartTabs.addTab(self.chartTab1, "매집현황")
         self.chartTabs.addTab(self.chartTab2, "분산비율")
         self.chartTabs.addTab(self.chartTab3, "투자자추이")
+        self.chartTabs.addTab(self.chartTab4, "네이버차트")
+
+        # 네이버차트 웹뷰
+        self.chartTab4.layout = QVBoxLayout(self)
+        app = wx.App()
+        dialog = MyBrowser(None, -1)
+        dialog.Show()
+        # self.chartTab4.layout.addWidget(self.naverwebview)
+        # self.chartTab4.setLayout(self.chartTab4.layout)
 
         # 레이아웃 바인딩
         self.layout.addWidget(self.chartTabs)
         self.setLayout(self.layout)
+
+class MyBrowser(wx.Dialog):
+  def __init__(parent, *args, **kwds):
+    wx.Dialog.__init__(parent, *args, **kwds)
+    sizer = wx.BoxSizer(wx.VERTICAL)
+    parent.browser = wx.html2.WebView.New(parent)
+    sizer.Add(parent.browser, 1, wx.EXPAND, 10)
+    parent.SetSizer(sizer)
+    parent.SetSize((700, 700))
 
 # PyQt5의 QTableWidget을 이용한 탭메뉴 구성
 class RowDataTabWid(QWidget):
@@ -916,7 +970,6 @@ if __name__ == "__main__":
     # ------------------------- 스타일 테마설정 끝 -----------------------------
 
     warnings.simplefilter("ignore")
-
     myWindow = MyWindow()
     myWindow.show()
     app.exec_()

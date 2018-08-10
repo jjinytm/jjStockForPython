@@ -323,7 +323,8 @@ class MyWindow(QMainWindow):
         for i in range(data_cnt):
             crrOfRow = self.rowDataTabWid.dataTable.rowCount()
             self.rowDataTabWid.dataTable.setRowCount(crrOfRow + 1)
-            self.rowDataTabWid.dataTable.setRowHeight(crrOfRow, 10)
+            self.rowDataTabWid.dataTable.setRowHeight(crrOfRow, 26)
+
             colidx = 0
             one_row_arr = []
             for j in self.rowDataTabWid.jmTabColItemInfo:
@@ -334,6 +335,7 @@ class MyWindow(QMainWindow):
                     self._set_cell_style(crrOfRow, colidx, self.rowDataTabWid.dataTable.item(crrOfRow, colidx).text(), self.rowDataTabWid.dataTable, 'N')
                 colidx += 1
                 self.lasted_date = self._comm_get_data(trcode, "", rqname, i, '일자')
+
 
             rowdatas.append(one_row_arr)
 
@@ -364,7 +366,7 @@ class MyWindow(QMainWindow):
             if len(totab.item(row, col).text()) >= (4 if value[:1] == '+' or value[:1] != '-' else 5):
                 totab.setItem(row, col, QTableWidgetItem(format(int(totab.item(row, col).text()), ',')))
 
-        totab.item(row, col).setTextAlignment(Qt.AlignRight)
+        totab.item(row, col).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         if value != '0' and value != '':
             if value[:1] == '+' or value[:1] != '-':

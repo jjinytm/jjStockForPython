@@ -3,17 +3,15 @@ import webbrowser
 import numpy as np
 import xlwt
 import requests
-import chardet
 import bs4
 import warnings
 import math
-import dao.DBConnector as db
-# import guiObjects.ChartTabWid
-
-from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QAxContainer import *
+from PyQt5.QtWidgets import *
+from PyQt5.QtWebEngineWidgets import *
+
 from datetime import datetime, timedelta
 from tkinter import *
 from urllib import parse
@@ -43,7 +41,6 @@ class MyWindow(QMainWindow):
         super().__init__()
 
         # ------------------------------------------------- init ----------------------------------------------------- #
-
         # Kiwoom Login
         self.kiwoom = QAxWidget("KHOPENAPI.KHOpenAPICtrl.1")
         self.kiwoom.dynamicCall("CommConnect()")
@@ -66,7 +63,6 @@ class MyWindow(QMainWindow):
         self.jongmokCode.setStyleSheet("QLineEdit{border:1px solid #B21016}")
         self.jongmokCode.textEdited.connect(self._get_code_by_autocomplete)
         # ime 모드를 한글로 바꿔보장 ㅠㅠ.
-
 
         # 날짜 표시 인풋
         self.cal_label = QLabel(self)
@@ -118,6 +114,7 @@ class MyWindow(QMainWindow):
         # 차트 탭메뉴
         self.chartTabWid = ChartTabWid(self)
         self.chartTabWid.setGeometry(608, 184, 1186, 496)
+        self.chartTabWid.chartTabs.currentChanged.connect(self._chart_tab_changed)
 
         # 리포트 and 뉴스 탭메뉴
         self.newsDataTabWid = NewsDataTabWid(self)
@@ -587,6 +584,8 @@ class MyWindow(QMainWindow):
             self.progress_arr[idx].setValue(round(int(self.rowDataTabWid.sugupTable.item(self.rowDataTabWid.sugupTable.rowCount() - 2, idx+3).text()) / total_boyu * 100))
             self.sugupGUItable.setCellWidget(1, idx+1, self.progress_arr[idx])  # 보유비중(현재보유랑 / 최대보유량 * 100)
 
+        # 네이버 차트 생성하기
+        self._make_naver_chart()
 
     # 증권리포트 크롤링 함수
     def getReportWebCrawling(self):
@@ -624,6 +623,9 @@ class MyWindow(QMainWindow):
         for ix in range(len(mbody)):
             crrOfRow = self.newsDataTabWid.reportDataTable.rowCount()
             one_row = mbody[ix].find_all('td')
+            if one_row[0].getText() == "결과가 없습니다.":
+                break
+
             # 테이블 한줄 생성.
             self.newsDataTabWid.reportDataTable.setRowCount(crrOfRow + 1)
             self.newsDataTabWid.reportDataTable.setRowHeight(crrOfRow, 10)
@@ -690,6 +692,28 @@ class MyWindow(QMainWindow):
                     np_sugup_data[rowidx, i] = 0
                 else:
                     np_sugup_data[rowidx, i] = (np_sugup_data[rowidx, i-2] / np_sugup_data[rowidx, i-1]) * 100
+
+    def _chart_tab_changed(self, _index):
+        if _index == 3:
+            self._make_naver_chart()
+            self.chartTabWid.setGeometry(608, 0, 1186, 680)
+        else:
+            self.chartTabWid.setGeometry(608, 184, 1186, 496)
+
+    def _make_naver_chart(self):
+        self.code = self.jongcodelbl.text()
+        self.charthtml = "<object width='900' height='900' id='NaverChart' classid='clsid:D27CDB6E-AE6D-11cf-96B8-444553540000'\
+                                 codebase='http://download.macromedia.com/pub/shockwave/cabs/flash/swflash.cab#version=9,0,0,0'>\
+                                 <param name='movie' value='https://ssl.pstatic.net/imgstock/fchart/NaverMashUpChart_1.0.0.swf'>\
+                                 <param name='quality' value='high'><param name='FlashVars' value='Symbol=" + self.code + "&amp;Description=&amp;\
+                                 MaxIndCount=4&amp;ChartType=캔들차트&amp;TimeFrame=day&amp;EditMode=true&amp;DataKey=undefined&amp;\
+                                 ExternalInterface=false'><param name='wmode' value='opaque'><embed name='NaverChart' width='1100' height='1000' \
+                                 id='NaverChart' pluginspage='http://www.macromedia.com/go/getflashplayer' \
+                                 src='https://ssl.pstatic.net/imgstock/fchart/NaverMashUpChart_1.0.0.swf' type='application/x-shockwave-flash' \
+                                 flashvars='Symbol=" + self.code + "&amp;Description=&amp;MaxIndCount=4&amp;ChartType=캔들차트&amp;TimeFrame=day&amp;\
+                                 EditMode=true&amp;DataKey=undefined&amp;ExternalInterface=false' wmode='opaque' quality='high' \
+                                 swliveconnect='TRUE'></object>"
+        self.chartTabWid.webviews.setHtml(self.charthtml)
 
     # 엑셀파일로 데이터 저장
     def savefile(self):
@@ -768,15 +792,37 @@ class ChartTabWid(QWidget):
         self.chartTab1 = QWidget()
         self.chartTab2 = QWidget()
         self.chartTab3 = QWidget()
+        self.chartTab4 = QWidget()
 
         # 탭 추가
         self.chartTabs.addTab(self.chartTab1, "매집현황")
         self.chartTabs.addTab(self.chartTab2, "분산비율")
         self.chartTabs.addTab(self.chartTab3, "투자자추이")
+        self.chartTabs.addTab(self.chartTab4, "차트")
+
+        # 웹뷰
+        self.chartTab4.layout = QVBoxLayout(self)
+        self.webviews = QWebEngineView(self)
+
+        self.webviews.setObjectName("webView")
+        self.chartTab4.layout.addWidget(self.webviews)
+        self.chartTab4.setLayout(self.chartTab4.layout)
 
         # 레이아웃 바인딩
         self.layout.addWidget(self.chartTabs)
         self.setLayout(self.layout)
+
+
+
+
+# class MyBrowser(wx.Dialog):
+#   def __init__(self, *args, **kwds):
+#     wx.Dialog.__init__(self, *args, **kwds)
+#     sizer = wx.BoxSizer(wx.VERTICAL)
+#     self.browser = wx.html2.WebView.New(self)
+#     sizer.Add(self.browser, 1, wx.EXPAND, 10)
+#     self.SetSizer(sizer)
+#     self.SetSize((700, 700))
 
 # PyQt5의 QTableWidget을 이용한 탭메뉴 구성
 class RowDataTabWid(QWidget):
@@ -857,7 +903,7 @@ if __name__ == "__main__":
     # ------------------------- 스타일 테마설정 끝 -----------------------------
 
     warnings.simplefilter("ignore")
-
+    QWebEngineSettings.globalSettings().setAttribute(QWebEngineSettings.PluginsEnabled, True)
     myWindow = MyWindow()
     myWindow.show()
     app.exec_()
